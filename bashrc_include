@@ -1,0 +1,4 @@
+alias wsbsp='cd /workspace/butler_server_prototyping'
+alias wsbs='cd /workspace/butler_server'
+alias wsbis='cd workspace/butler_installation_scripts'
+alias bsp='cd /workspace/butler_server_prototyping'

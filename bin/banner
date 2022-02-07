@@ -1,0 +1,4 @@
+#!/bin/bash
+if [[ $# -gt 0 ]]; then
+  printf ">>\n>> $*\n>>\n"
+fi

@@ -1,0 +1,161 @@
+ARG FROM_IMAGE
+FROM ${FROM_IMAGE}
+
+# install basic system packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-utils \
+    apt \
+    software-properties-common
+
+# setup /opt for installing 3rd party packages
+RUN mkdir /opt >/dev/null 2>&1 || true
+WORKDIR /opt
+
+# setup the server user
+ARG SERVER_USER
+RUN useradd -m ${SERVER_USER} -G dialout,video,plugdev -p ${SERVER_USER} -s /bin/bash && \
+    echo "${SERVER_USER}:${SERVER_USER}" | chpasswd
+
+# system scripts setup
+COPY ./docker/assets/dev/system/sbin/ /sbin
+RUN chmod 755 /sbin/docker-*
+RUN sed -i "6iexport SERVER_USER=\"${SERVER_USER}\"\nexport SERVER_GROUP=\"${SERVER_USER}\"" /sbin/docker-start-container.sh
+
+RUN apt-get install -y --no-install-recommends \
+    openjdk-11-jdk \
+    maven
+
+# Python
+RUN apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip
+RUN pip install --upgrade pip
+RUN pip install virtualenv
+RUN pip install virtualenvwrapper
+
+
+# install system packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    coinor-clp \
+    coinor-libclp-dev \
+    curl \
+    libcanberra-gtk-module \
+    feh \
+    gnupg \
+    iproute2 \
+    less \
+    libxkbcommon0 \
+    libgbm1 \
+    libtool \
+    libz-dev \
+    libbz2-dev \
+    make \
+    libncurses5-dev libncursesw5-dev \
+    net-tools \
+    openssh-client \
+    openssl \
+    pkg-config \
+    perl \
+    rsync \
+    software-properties-common \
+    ssh \
+    swig \
+    systemd \
+    systemd-sysv \
+    tzdata \
+    unzip \
+    vim \
+    wget \
+    zlib1g-dev
+
+ENV TZ=America/New_York
+RUN echo "America/New_York" > /etc/timezone
+RUN dpkg-reconfigure -f noninteractive tzdata
+
+# Need to link the linear programming library (COIN-OR)
+RUN pkg-config --cflags --libs clp
+
+# user setup
+ARG SERVER_USER
+COPY ./docker/assets/dev/user/.bashrc /home/${SERVER_USER}/.bashrc
+RUN chown ${SERVER_USER}:${SERVER_USER} /home/${SERVER_USER}/.bashrc
+
+# ------------------------------------------------------
+# Basic developer system setup
+# ------------------------------------------------------
+
+# install sudo for dev user
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo
+ARG SERVER_USER
+RUN usermod -a -G sudo ${SERVER_USER}
+
+
+# setup .bashrc to source .bashrc_dev if available
+RUN echo "\n# developer setup\nif [ -f ~/.bashrc_dev ]; then\n    . ~/.bashrc_dev\nfi" >> /home/${SERVER_USER}/.bashrc
+
+
+# system setup
+COPY ./docker/assets/dev/system/etc /etc
+COPY ./docker/assets/dev/system/sbin /sbin
+RUN chmod 755 /sbin/docker-* /etc/sudoers.d/sudoers-custom
+RUN sed -i "6iexport SERVER_USER=\"${SERVER_USER}\"\nexport SERVER_GROUP=\"${SERVER_USER}\"" /sbin/docker-start-container.sh
+
+# workspace setup
+RUN mkdir -p /workspace && \
+    chown ${SERVER_USER}:${SERVER_USER} /workspace
+
+# home dir setup
+COPY ./docker/assets/dev/user /home/${SERVER_USER}
+# COPY ./git /home/${SERVER_USER}
+RUN mkdir /home/${SERVER_USER}/bin
+RUN chown ${SERVER_USER}:${SERVER_USER} /home/${SERVER_USER}/.* /home/${SERVER_USER}/*
+
+RUN curl -o /home/${SERVER_USER}/bin/rebar3 https://s3.amazonaws.com/rebar3/rebar3
+RUN chmod a+x /home/${SERVER_USER}/bin/rebar3
+
+# basic developer tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ccache \
+    gdb \
+    git \
+    git-core \
+    git-man \
+    less \
+    nano \
+    unzip
+
+# ------------------------------------------------------
+# vim
+# ------------------------------------------------------
+ARG PP_DEV_USE_VIM=false
+RUN if [ "$PP_DEV_USE_VIM" = "true" ]; then \
+  add-apt-repository ppa:jonathonf/vim && \
+  apt update && \
+  apt install -y vim && \
+  curl -s -fLo /home/${SERVER_USER}/.vim/autoload/plug.vim --create-dirs \
+         https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim && \
+  vim -u /home/${SERVER_USER}/.vim/autoload/plug.vim \
+        --not-a-term \
+        +'so /home/${SERVER_USER}/.vimrc' \
+        +'autocmd VimEnter * PlugInstall --sync | source $MYVIMRC' \
+        +qa \
+        > /dev/null && \
+        mkdir -m 777 /home/${SERVER_USER}/.vim/plugged; \
+  fi
+
+RUN wget -q https://download-cf.jetbrains.com/idea/ideaIC-2021.2.tar.gz -O - \
+    | tar -xz -C /opt
+RUN echo '\nPATH=${PATH}:/opt/idea-IC-212.4746.92/bin\nalias intellij="idea.sh &"\n' >> /home/${SERVER_USER}/.bashrc
+
+COPY bashrc_include* /home/${SERVER_USER}
+RUN for incfile in /home/${SERVER_USER}/bashrc_include* ; do if [ -f ${incfile} ] ; then cat ${incfile} >> /home/${SERVER_USER}/.bashrc ; fi; done
+
+RUN apt-get update \
+    && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT ["/sbin/docker-start-container.sh"]
